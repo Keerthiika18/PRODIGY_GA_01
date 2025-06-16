@@ -1,0 +1,31 @@
+from pathlib import Path
+from datasets import load_dataset
+from transformers import GPT2Tokenizer,GPT2LMHeadModel,DataCollatorForLanguageModeling,TrainingArguments,Trainer,pipeline
+
+MODEL_NAME="gpt2"
+DATA_FILE="data.txt"
+MAX_LENGTH=128
+TRAIN_BATCH_SIZE=4
+EPOCHS=3
+OUTPUT_DIR="./gpt2-finetuned"
+USE_FP16=True
+SEED=42
+
+dataset=load_dataset("text",data_files={"train":DATA_FILE})
+tokenizer=GPT2Tokenizer.from_pretrained(MODEL_NAME)
+tokenizer.pad_token=tokenizer.eos_token
+def tokenize_function(examples):
+    return tokenizer(examples["text"],truncation=True,max_length=MAX_LENGTH,padding="max_length")
+tokenized_dataset=dataset.map(tokenize_function,batched=True,remove_columns=["text"])
+data_collator=DataCollatorForLanguageModeling(tokenizer=tokenizer,mlm=False)
+model=GPT2LMHeadModel.from_pretrained(MODEL_NAME)
+model.resize_token_embeddings(len(tokenizer))
+training_args=TrainingArguments(output_dir=OUTPUT_DIR,overwrite_output_dir=True,num_train_epochs=EPOCHS,per_device_train_batch_size=TRAIN_BATCH_SIZE,save_steps=500,save_total_limit=2,seed=SEED,fp16=USE_FP16,logging_steps=50,report_to="none")
+trainer=Trainer(model=model,args=training_args,train_dataset=tokenized_dataset["train"],data_collator=data_collator)
+trainer.train()
+trainer.save_model(OUTPUT_DIR)
+tokenizer.save_pretrained(OUTPUT_DIR)
+generator=pipeline("text-generation",model=GPT2LMHeadModel.from_pretrained(OUTPUT_DIR),tokenizer=GPT2Tokenizer.from_pretrained(OUTPUT_DIR))
+prompt="Once upon a midnight dreary,"
+outputs=generator(prompt,max_length=100,num_return_sequences=1,do_sample=True,top_p=0.95,temperature=0.8)
+print(outputs[0]["generated_text"])
